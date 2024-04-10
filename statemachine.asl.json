@@ -1,0 +1,118 @@
+{
+	"Comment": "Websocket StateMachine",
+	"StartAt": "Parallel",
+	"States": {
+		"Parallel": {
+			"Type": "Parallel",
+			"Next": "Lambda Invoke",
+			"Branches": [
+				{
+					"StartAt": "Fetch context",
+					"States": {
+						"Fetch context": {
+							"Type": "Task",
+							"Parameters": {
+								"TableName": "${ContextTable}",
+								"KeyConditionExpression": "PK = :pk",
+								"ExpressionAttributeValues": {
+									":pk": {
+										"S.$": "$.ConnectionID"
+									}
+								}
+							},
+							"Resource": "arn:aws:states:::aws-sdk:dynamodb:query",
+							"End": true
+						}
+					}
+				},
+				{
+					"StartAt": "Query",
+					"States": {
+						"Query": {
+							"Type": "Task",
+							"End": true,
+							"Parameters": {
+								"IndexId": "${KendraId}",
+								"QueryText.$": "$.data.message",
+								"PageSize": 60
+							},
+							"Resource": "arn:aws:states:::aws-sdk:kendra:query"
+						}
+					}
+				}
+			],
+			"ResultPath": "$.contentResults"
+		},
+		"Lambda Invoke": {
+			"Type": "Task",
+			"Resource": "arn:aws:states:::lambda:invoke",
+			"Parameters": {
+				"Payload.$": "$",
+				"FunctionName": "${PromptFunction}"
+			},
+			"Retry": [
+				{
+					"ErrorEquals": [
+						"Lambda.ServiceException",
+						"Lambda.AWSLambdaException",
+						"Lambda.SdkClientException",
+						"Lambda.TooManyRequestsException"
+					],
+					"IntervalSeconds": 1,
+					"MaxAttempts": 3,
+					"BackoffRate": 2
+				}
+			],
+			"Next": "DynamoDB PutItem",
+			"ResultPath": "$.fullResults",
+			"TimeoutSeconds": 60,
+			"Catch": [
+				{
+					"ErrorEquals": [
+						"States.Timeout",
+						"States.TaskFailed"
+					],
+					"Next": "Warn user of issue",
+					"Comment": "Warn user of issue"
+				}
+			]
+		},
+		"Warn user of issue": {
+			"Type": "Task",
+			"Resource": "arn:aws:states:::apigateway:invoke",
+			"Parameters": {
+				"ApiEndpoint": "${WSApi}",
+				"Method": "POST",
+				"Stage": "${WSApiStage}",
+				"Path.$": "States.Format('/@connections/{}', $.ConnectionID)",
+				"RequestBody": {
+					"Message": "There was an error, please try again."
+				},
+				"AuthType": "IAM_ROLE"
+			},
+			"End": true
+		},
+		"DynamoDB PutItem": {
+			"Type": "Task",
+			"Resource": "arn:aws:states:::dynamodb:putItem",
+			"Parameters": {
+				"TableName": "${ContextTable}",
+				"Item": {
+					"PK": {
+						"S.$": "$.ConnectionID"
+					},
+					"SK": {
+						"N.$": "$.timestamp"
+					},
+					"question": {
+						"S.$": "$.data.message"
+					},
+					"answer": {
+						"S.$": "$.fullResults.Payload"
+					}
+				}
+			},
+			"End": true
+		}
+	}
+}

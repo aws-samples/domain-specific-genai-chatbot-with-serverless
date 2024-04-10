@@ -1,17 +1,12 @@
-## My Project
+# Ask Serverlessland domain specific GenAI chat-bot using serverless and Amazon Bedrock
 
-TODO: Fill this README out!
+This sample domeonstrates how to build a domain specific chatbot using serverless and Bedrock. The chatbot employs Retrieval-Augments Generation (RAG) and chat history to provide context for the LLM to answer.
 
-Be sure to:
+## Services Used
+- Amazon API Gateway
+- Amazon Kendra
+- AWS Lambda
+- AWS Step Functions
 
-* Change the title in this README
-* Edit your repository description on GitHub
-
-## Security
-
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
-
-## License
-
-This library is licensed under the MIT-0 License. See the LICENSE file.
-
+## Prerequisites
+Kendra index. This current implementation uses Amazon Kendra to provide the

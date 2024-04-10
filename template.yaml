@@ -1,0 +1,226 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Ask Serverlessland GenAI chatbot backend
+Parameters:
+  ApiStageName:
+    Description: Name of WebSockets API stage
+    Type: String
+    Default: api
+  KendraIndex:
+    Description: Kendra index name
+    Type: String
+  BedrockModel:
+    Description: Bedrock model name
+    Type: String
+    Default: anthropic.claude-3-sonnet-20240229-v1:0
+  AnthropicVersion:
+    Description: Anthropic version
+    Type: String
+    Default: bedrock-2023-05-31
+Resources:
+  AskApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-AskApi
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+  Deployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - DefaultRoute
+    Properties:
+      ApiId: !Ref AskApi
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: !Ref ApiStageName
+      DeploymentId: !Ref Deployment
+      ApiId: !Ref AskApi
+      DefaultRouteSettings:
+        DetailedMetricsEnabled: true
+        LoggingLevel: ERROR
+        DataTraceEnabled: false
+      AccessLogSettings:
+        DestinationArn: !GetAtt WebSocketLoggingGroup.Arn
+        Format: $context.status $context.responseLength $context.requestId $context.error.messageString
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AskApi
+      RouteKey: $default
+      AuthorizationType: NONE
+      OperationName: DefaultRoute
+      Target: !Join
+        - /
+        - - integrations
+          - !Ref DefaultRouteIntegration
+  DefaultRouteIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref AskApi
+      IntegrationType: AWS
+      IntegrationMethod: POST
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:states:action/StartExecution
+      CredentialsArn: !Sub ${StepFunctionsAsyncExecutionRole.Arn}
+      TemplateSelectionExpression: \$default
+      RequestTemplates:
+        $default: !Sub |
+          #set($sfn_input=$util.escapeJavaScript($input.body).replaceAll("\\'","'")) {
+            "input": "{\"data\":$sfn_input, \"timestamp\":\"$context.requestTimeEpoch\", \"ConnectionID\":\"$context.connectionId\"}",
+            "stateMachineArn": "${AskStateMachine}"
+          }
+  DefaultRouteResponse:
+    Type: AWS::ApiGatewayV2::RouteResponse
+    Properties:
+      RouteId: !Ref DefaultRoute
+      ApiId: !Ref AskApi
+      RouteResponseKey: $default
+  DefaultRouteIntegrationResponse:
+    Type: AWS::ApiGatewayV2::IntegrationResponse
+    Properties:
+      ApiId: !Ref AskApi
+      IntegrationId: !Ref DefaultRouteIntegration
+      IntegrationResponseKey: $default
+  WebSocketLoggingGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 1
+  ContextTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: 'N'
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+  AskStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Type: EXPRESS
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ContextTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PromptFunction
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogDelivery
+                - logs:GetLogDelivery
+                - logs:UpdateLogDelivery
+                - logs:DeleteLogDelivery
+                - logs:ListLogDeliveries
+                - logs:PutResourcePolicy
+                - logs:DescribeResourcePolicies
+                - logs:DescribeLogGroups
+                - bedrock:InvokeModel
+                - kendra:Query
+                - execute-api:ManageConnections
+              Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource:
+                - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${AskApi}/api/POST/@connections/{connectionId}
+      Tracing:
+        Enabled: true
+      Logging:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt AskStateMachineLoggingGroup.Arn
+      DefinitionSubstitutions:
+        WSApi: !Sub ${AskApi}.execute-api.${AWS::Region}.amazonaws.com
+        WSApiStage: !Ref ApiStageName
+        PromptFunction: !Ref PromptFunction
+        ContextTable: !Ref ContextTable
+        KendraId: !Ref KendraIndex
+      DefinitionUri: ./statemachine.asl.json
+  AskStateMachineLoggingGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 1
+      LogGroupName: !Sub
+        - /aws/vendedlogs/states/${AWS::StackName}-${ResourceId}-Logs
+        - ResourceId: AskStateMachine
+  StepFunctionsAsyncExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: StepFunctionsAsyncExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref AskStateMachine
+  PromptFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: PromptFunction
+      CodeUri: src
+      Handler: app.handler
+      Runtime: python3.12
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModelWithResponseStream
+                - execute-api:ManageConnections
+              Resource: '*'
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          API_GATEWAY_ENDPOINT_URL: !Sub https://${AskApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}
+          BEDROCK_MODEL_ID: !Ref BedrockModel
+          ANTHROPIC_VERSION: !Ref AnthropicVersion
+          MAX_TOKENS: '8000'
+  PromptFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${PromptFunction}
+Outputs:
+  APIEndpoint:
+    Description: API Gateway WebSocket endpoint URL
+    Value: !Sub wss://${AskApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}
+  APIAccessLogGroup:
+    Description: Logging group for API
+    Value: !Ref WebSocketLoggingGroup
+  PromptFunctionAccessLogGroup:
+    Description: Logging group for Lambda function
+    Value: !Ref PromptFunctionLogGroup
+  APIExecutionLogs:
+    Description: Execution logs
+    Value: !Sub /aws/apigateway/${AskApi}/${ApiStageName}
+  AskStateMachineLogGroup:
+    Description: State machine log group
+    Value: !Ref AskStateMachineLoggingGroup
