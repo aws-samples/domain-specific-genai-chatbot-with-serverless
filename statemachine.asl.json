@@ -4,7 +4,7 @@
 	"States": {
 		"Parallel": {
 			"Type": "Parallel",
-			"Next": "Lambda Invoke",
+			"Next": "Ask bedrock",
 			"Branches": [
 				{
 					"StartAt": "Fetch context",
@@ -26,9 +26,9 @@
 					}
 				},
 				{
-					"StartAt": "Query",
+					"StartAt": "Query related data",
 					"States": {
-						"Query": {
+						"Query related data": {
 							"Type": "Task",
 							"End": true,
 							"Parameters": {
@@ -36,14 +36,39 @@
 								"QueryText.$": "$.data.message",
 								"PageSize": 60
 							},
-							"Resource": "arn:aws:states:::aws-sdk:kendra:query"
+							"Resource": "arn:aws:states:::aws-sdk:kendra:query",
+							"Catch": [
+								{
+									"ErrorEquals": [
+										"Kendra.ValidationException"
+									],
+									"Next": "Payload too large for Kendra",
+									"ResultPath": "$.kendraError"
+								}
+							]
+						},
+						"Payload too large for Kendra": {
+							"Type": "Task",
+							"Resource": "arn:aws:states:::apigateway:invoke",
+							"Parameters": {
+								"ApiEndpoint": "${WSApi}",
+								"Method": "POST",
+								"Stage": "${WSApiStage}",
+								"Path.$": "States.Format('/@connections/{}', $.ConnectionID)",
+								"RequestBody": "**The payload was too large for Amazon Kendra, please limit your question to 1000 characters.**",
+								"AuthType": "IAM_ROLE"
+							},
+							"Next": "Exit state machine"
+						},
+						"Exit state machine": {
+							"Type": "Fail"
 						}
 					}
 				}
 			],
 			"ResultPath": "$.contentResults"
 		},
-		"Lambda Invoke": {
+		"Ask bedrock": {
 			"Type": "Task",
 			"Resource": "arn:aws:states:::lambda:invoke",
 			"Parameters": {
@@ -73,7 +98,8 @@
 						"States.TaskFailed"
 					],
 					"Next": "Warn user of issue",
-					"Comment": "Warn user of issue"
+					"Comment": "Warn user of issue",
+					"ResultPath": "$.PromptError"
 				}
 			]
 		},
@@ -85,9 +111,7 @@
 				"Method": "POST",
 				"Stage": "${WSApiStage}",
 				"Path.$": "States.Format('/@connections/{}', $.ConnectionID)",
-				"RequestBody": {
-					"Message": "There was an error, please try again."
-				},
+				"RequestBody": "**There was an error, please try again later.**",
 				"AuthType": "IAM_ROLE"
 			},
 			"End": true
