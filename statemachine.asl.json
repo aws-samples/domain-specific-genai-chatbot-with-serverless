@@ -7,9 +7,9 @@
 			"Next": "Ask bedrock",
 			"Branches": [
 				{
-					"StartAt": "Fetch context",
+					"StartAt": "Fetch history",
 					"States": {
-						"Fetch context": {
+						"Fetch history": {
 							"Type": "Task",
 							"Parameters": {
 								"TableName": "${ContextTable}",
@@ -26,9 +26,9 @@
 					}
 				},
 				{
-					"StartAt": "Query related data",
+					"StartAt": "Fetch context",
 					"States": {
-						"Query related data": {
+						"Fetch context": {
 							"Type": "Task",
 							"End": true,
 							"Parameters": {
@@ -42,12 +42,12 @@
 									"ErrorEquals": [
 										"Kendra.ValidationException"
 									],
-									"Next": "Payload size error",
+									"Next": "Error: payload",
 									"ResultPath": "$.kendraError"
 								}
 							]
 						},
-						"Payload size error": {
+						"Error: payload": {
 							"Type": "Task",
 							"Resource": "arn:aws:states:::apigateway:invoke",
 							"Parameters": {
@@ -88,7 +88,7 @@
 					"BackoffRate": 2
 				}
 			],
-			"Next": "DynamoDB PutItem",
+			"Next": "Update history",
 			"ResultPath": "$.fullResults",
 			"TimeoutSeconds": 60,
 			"Catch": [
@@ -97,13 +97,13 @@
 						"States.Timeout",
 						"States.TaskFailed"
 					],
-					"Next": "Invoke error",
+					"Next": "Error: invocation",
 					"Comment": "Warn user of issue",
 					"ResultPath": "$.PromptError"
 				}
 			]
 		},
-		"Invoke error": {
+		"Error: invocation": {
 			"Type": "Task",
 			"Resource": "arn:aws:states:::apigateway:invoke",
 			"Parameters": {
@@ -116,7 +116,7 @@
 			},
 			"End": true
 		},
-		"DynamoDB PutItem": {
+		"Update history": {
 			"Type": "Task",
 			"Resource": "arn:aws:states:::dynamodb:putItem",
 			"Parameters": {
