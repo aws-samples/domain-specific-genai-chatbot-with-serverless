@@ -42,12 +42,12 @@
 									"ErrorEquals": [
 										"Kendra.ValidationException"
 									],
-									"Next": "Payload too large for Kendra",
+									"Next": "Payload size error",
 									"ResultPath": "$.kendraError"
 								}
 							]
 						},
-						"Payload too large for Kendra": {
+						"Payload size error": {
 							"Type": "Task",
 							"Resource": "arn:aws:states:::apigateway:invoke",
 							"Parameters": {
@@ -97,13 +97,13 @@
 						"States.Timeout",
 						"States.TaskFailed"
 					],
-					"Next": "Warn user of issue",
+					"Next": "Invoke error",
 					"Comment": "Warn user of issue",
 					"ResultPath": "$.PromptError"
 				}
 			]
 		},
-		"Warn user of issue": {
+		"Invoke error": {
 			"Type": "Task",
 			"Resource": "arn:aws:states:::apigateway:invoke",
 			"Parameters": {
