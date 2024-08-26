@@ -42,7 +42,8 @@ Resources:
         DataTraceEnabled: false
       AccessLogSettings:
         DestinationArn: !GetAtt WebSocketLoggingGroup.Arn
-        Format: $context.status $context.responseLength $context.requestId $context.error.messageString
+        Format: $context.status $context.responseLength $context.requestId
+          $context.error.messageString
   DefaultRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
