@@ -1,6 +1,6 @@
 # Domain specific GenAI chat-bot using serverless technologies and Amazon Bedrock
 
-This sample domeonstrates how to build a domain specific chatbot using serverless and Bedrock. The chatbot employs Retrieval-Augments Generation (RAG) and chat history to provide context for the LLM to answer. 
+This sample demonstrates how to build a domain specific chatbot using serverless and Bedrock. The chatbot employs Retrieval-Augments Generation (RAG) and chat history to provide context for the LLM to answer. 
 
 ***Caution: deploying and running this application can incur charges on AWS. All services used offer a free tier to get started but please be aware.***
 
